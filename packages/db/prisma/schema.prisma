@@ -1,0 +1,247 @@
+// Financial Tracker — Prisma schema
+// Provider: PostgreSQL (Neon)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth (shape compatible with Better Auth's Prisma adapter; also works fine
+// as a reference model if you swap to Clerk — in that case `User.id` becomes
+// the Clerk user id and you can drop Session/Account/Verification).
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  image         String?
+  emailVerified Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions      Session[]
+  accounts      Account[]
+
+  bankAccounts  BankAccount[]
+  transactions  Transaction[]
+  categories    Category[]
+  statements    BankStatement[]
+  chatSessions  ChatSession[]
+  budgets       Budget[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  providerId        String // e.g. "credentials", "google"
+  accountId         String
+  accessToken       String?
+  refreshToken      String?
+  passwordHash      String?
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@map("verifications")
+}
+
+// ---------------------------------------------------------------------------
+// Core finance domain
+// ---------------------------------------------------------------------------
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CREDIT_CARD
+  CASH
+  INVESTMENT
+  OTHER
+}
+
+model BankAccount {
+  id          String      @id @default(cuid())
+  userId      String
+  name        String
+  type        AccountType @default(CHECKING)
+  institution String?
+  last4       String?
+  currency    String      @default("USD")
+  createdAt   DateTime    @default(now())
+
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  statements   BankStatement[]
+
+  @@index([userId])
+  @@map("bank_accounts")
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+model Category {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  icon      String? // lucide icon name
+  color     String? // hex
+  isSystem  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  budgets      Budget[]
+
+  @@unique([userId, name])
+  @@map("categories")
+}
+
+model Transaction {
+  id              String          @id @default(cuid())
+  userId          String
+  bankAccountId   String?
+  statementId     String?
+  categoryId      String?
+  description     String
+  merchant        String?
+  amount          Decimal         @db.Decimal(14, 2)
+  type            TransactionType
+  currency        String          @default("USD")
+  occurredAt      DateTime
+  isRecurring     Boolean         @default(false)
+  aiCategorized   Boolean         @default(false)
+  aiConfidence    Float?
+  rawDescription  String? // original line from statement, kept for audit
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount BankAccount?  @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  category    Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  statement   BankStatement? @relation(fields: [statementId], references: [id], onDelete: SetNull)
+
+  @@index([userId, occurredAt])
+  @@index([userId, categoryId])
+  @@map("transactions")
+}
+
+enum StatementStatus {
+  UPLOADED
+  PARSING
+  PARSED
+  FAILED
+}
+
+model BankStatement {
+  id             String          @id @default(cuid())
+  userId         String
+  bankAccountId  String?
+  fileName       String
+  storagePath    String // path inside Supabase Storage bucket
+  fileType       String // "csv" | "pdf" | "ofx" | ...
+  status         StatementStatus @default(UPLOADED)
+  errorMessage   String?
+  transactionCount Int           @default(0)
+  periodStart    DateTime?
+  periodEnd      DateTime?
+  createdAt      DateTime        @default(now())
+  parsedAt       DateTime?
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount  BankAccount?  @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  transactions Transaction[]
+
+  @@index([userId])
+  @@map("bank_statements")
+}
+
+model Budget {
+  id         String   @id @default(cuid())
+  userId     String
+  categoryId String
+  monthlyCap Decimal  @db.Decimal(14, 2)
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, categoryId])
+  @@map("budgets")
+}
+
+// ---------------------------------------------------------------------------
+// AI chat support
+// ---------------------------------------------------------------------------
+
+model ChatSession {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String   @default("New chat")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@index([userId])
+  @@map("chat_sessions")
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+  SYSTEM
+  TOOL
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      ChatRole
+  content   String
+  toolCalls Json?
+  createdAt DateTime @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("chat_messages")
+}
