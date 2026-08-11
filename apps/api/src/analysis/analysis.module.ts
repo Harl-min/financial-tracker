@@ -45,19 +45,21 @@ export class AnalysisService {
     });
 
     const categories = await this.prisma.category.findMany({
-      where: { id: { in: grouped.map((g) => g.categoryId).filter((id): id is string => !!id) } },
-    });
-    const byId = new Map(categories.map((c) => [c.id, c]));
+      where: { id: { in: grouped.map((g: { categoryId: any }) => g.categoryId).filter((id: any): id is string => !!id) } },
+    }) as Array<{ id: string; name: string; color: string }>;
+    const byId = new Map<string, { name: string; color: string }>(
+      categories.map((c) => [c.id, { name: c.name, color: c.color }])
+    );
 
     return grouped
-      .map((g) => ({
+      .map((g: { categoryId: unknown; _sum: { amount: any; }; _count: any; }) => ({
         categoryId: g.categoryId,
-        categoryName: g.categoryId ? byId.get(g.categoryId)?.name ?? "Uncategorized" : "Uncategorized",
-        color: g.categoryId ? byId.get(g.categoryId)?.color : "#94a3b8",
+        categoryName: g.categoryId ? byId.get(g.categoryId as string)?.name ?? "Uncategorized" : "Uncategorized",
+        color: g.categoryId ? byId.get(g.categoryId as string)?.color : "#94a3b8",
         total: Number(g._sum.amount ?? 0),
         count: g._count,
       }))
-      .sort((a, b) => b.total - a.total);
+      .sort((a: { total: number; }, b: { total: number; }) => b.total - a.total);
   }
 
   /** Month-over-month income vs expense — feeds the trend line/bar chart. */
@@ -95,7 +97,7 @@ export class AnalysisService {
       orderBy: { _sum: { amount: "desc" } },
       take: limit,
     });
-    return grouped.map((g) => ({ merchant: g.merchant, total: Number(g._sum.amount ?? 0), count: g._count }));
+    return grouped.map((g: { merchant: any; _sum: { amount: any; }; _count: any; }) => ({ merchant: g.merchant, total: Number(g._sum.amount ?? 0), count: g._count }));
   }
 }
 

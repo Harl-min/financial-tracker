@@ -6,7 +6,7 @@ import { Resend } from "resend";
 
 @Injectable()
 export class InngestService {
-  public functions;
+  public functions: any[];
 
   constructor(
     private statements: StatementsService,
@@ -27,7 +27,11 @@ export class InngestService {
         if (parsed.status === "PARSED") {
           await step.sendEvent("emit-parsed-event", {
             name: "statement/parsed",
-            data: { statementId, userId, transactionCount: parsed.transactionCount },
+            data: {
+              statementId,
+              userId,
+              transactionCount: parsed.transactionCount,
+            },
           });
         }
 
@@ -39,14 +43,18 @@ export class InngestService {
       { id: "notify-statement-parsed" },
       { event: "statement/parsed" },
       async ({ event, step }) => {
-        const user = await step.run("get-user", () =>
-          this.prisma.user.findUniqueOrThrow({ where: { id: event.data.userId } }),
+        const user = await step.run("get-user", async () =>
+          this.prisma.user.findUniqueOrThrow({
+            where: { id: event.data.userId },
+          }),
         );
 
         await step.run("send-email", async () => {
           if (!process.env.RESEND_API_KEY) return; // no-op until Resend is configured
           await resend.emails.send({
-            from: process.env.RESEND_FROM_EMAIL ?? "Financial Tracker <notifications@example.com>",
+            from:
+              process.env.RESEND_FROM_EMAIL ??
+              "Financial Tracker <notifications@example.com>",
             to: user.email,
             subject: "Your statement has been processed",
             html: `<p>Hi ${user.name ?? ""},</p><p>We imported <strong>${event.data.transactionCount}</strong> transactions from your latest bank statement. Open the dashboard to review categorization and spending insights.</p>`,
@@ -60,9 +68,18 @@ export class InngestService {
       { id: "weekly-spending-digest" },
       { cron: "0 8 * * 1" },
       async ({ step }) => {
-        const users = await step.run("get-users", () => this.prisma.user.findMany({ select: { id: true } }));
+        const users = await step.run(
+          "get-users",
+          async (): Promise<{ id: string }[]> => {
+            return this.prisma.user.findMany({ select: { id: true } });
+          },
+        );
+
         for (const u of users) {
-          await step.sendEvent("queue-digest", { name: "email/weekly-summary", data: { userId: u.id } });
+          await step.sendEvent("queue-digest", {
+            name: "email/weekly-summary",
+            data: { userId: u.id },
+          });
         }
       },
     );

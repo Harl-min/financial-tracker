@@ -44,8 +44,12 @@ export class CategorizerService {
     userId: string,
     rows: { description: string; merchant?: string }[],
   ): Promise<{ categoryId: string | null; aiCategorized: boolean; aiConfidence?: number }[]> {
-    const categories = await this.prisma.category.findMany({ where: { userId } });
-    const byName = new Map(categories.map((c) => [c.name, c]));
+    // Ensure we have the expected shape so TypeScript knows categories have id/name
+    const categories = (await this.prisma.category.findMany({ where: { userId } })) as {
+      id: string;
+      name: string;
+    }[];
+    const byName = new Map<string, { id: string; name: string }>(categories.map((c) => [c.name, c]));
     const other = byName.get("Other");
 
     const results: { categoryId: string | null; aiCategorized: boolean; aiConfidence?: number }[] = [];

@@ -11,7 +11,7 @@ export class TransactionsService {
     const page = query.page ?? 1;
     const pageSize = Math.min(query.pageSize ?? 25, 100);
 
-    const where: Prisma.TransactionWhereInput = {
+    const where = {
       userId,
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
       ...(query.type ? { type: query.type } : {}),
